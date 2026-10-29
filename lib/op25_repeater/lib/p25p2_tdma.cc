@@ -19,6 +19,7 @@
 // 02110-1301, USA.
 
 #include <stdint.h>
+#include <cmath>
 #include <map>
 #include <string.h>
 #include <string>
@@ -161,6 +162,26 @@ void p25p2_tdma::call_end() {
 	cached_src_id = -1;
 	cached_grp_id = -1;
 	cached_id_timestamp = 0;
+}
+
+// AMBE dequantization predicts each frame from prev_mp, so a non-finite value
+// there propagates forever and every later frame synthesizes as silence.
+static bool mbe_parms_finite(const mbe_parms *mp) {
+	if (!std::isfinite(mp->w0) || !std::isfinite(mp->gamma))
+		return false;
+	for (int l = 0; l < 57; l++) {
+		if (!std::isfinite(mp->Ml[l]) || !std::isfinite(mp->log2Ml[l]))
+			return false;
+	}
+	return true;
+}
+
+void p25p2_tdma::reset_vocoder(void) {
+	mbe_initMbeParms (&cur_mp, &prev_mp, &enh_mp);
+	mbe_initToneParms (&tone_mp);
+	mbe_initErrParms (&errs_mp);
+	mbe_err_cnt = 0;
+	tone_frame = false;
 }
 
 void p25p2_tdma::crypt_reset() {
@@ -708,6 +729,13 @@ void p25p2_tdma::handle_voice_frame(const uint8_t dibits[], int slot, int voice_
 	int K;
 	int rc = -1;
 	frame_type fr_type = FT_4V_0;
+
+	bool state_finite = mbe_parms_finite(&cur_mp) && mbe_parms_finite(&prev_mp);
+	if (!state_finite)
+		fprintf(stderr, "%s p25p2_tdma: non-finite vocoder state (w0=%f gamma=%f), reinitializing\n",
+			logts.get(d_msgq_id), prev_mp.w0, prev_mp.gamma);
+	if (vocoder_reset_pending.exchange(false) || !state_finite)
+		reset_vocoder();
 
 	// Deinterleave and figure out frame type:
 	errs = vf.process_vcw(&errs_mp, dibits, b, u);

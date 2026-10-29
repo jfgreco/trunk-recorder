@@ -22,6 +22,7 @@
 #define INCLUDED_P25P2_TDMA_H
 
 #include <stdint.h>
+#include <atomic>
 #include <deque>
 #include <vector>
 #include <gnuradio/msg_queue.h>
@@ -47,6 +48,7 @@ public:
 	int handle_packet(uint8_t dibits[], const uint64_t fs) ;
 	void set_slotid(int slotid);
 	void call_end();
+	inline void request_vocoder_reset() { vocoder_reset_pending = true; }	// applied by the decoder thread at the next voice frame
 	void crypt_reset();
 	void crypt_key(uint16_t keyid, uint8_t algid, const std::vector<uint8_t> &key);
 	uint8_t* tdma_xormask;
@@ -77,6 +79,8 @@ private:
 	mbe_errs errs_mp;
 	int mbe_err_cnt;
 	bool tone_frame;
+	std::atomic<bool> vocoder_reset_pending{false};
+	void reset_vocoder(void);
 	software_imbe_decoder software_decoder;
 	imbe_vocoder vocoder;
 	gr::msg_queue::sptr d_msg_queue;
